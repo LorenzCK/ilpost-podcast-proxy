@@ -1,10 +1,13 @@
 ﻿using Microsoft.Extensions.Logging;
 using RestSharp;
 using RestSharp.Interceptors;
+using System.Net;
 
 namespace IlPostPodcastProxy {
     internal class RestSharpBodyDumperInterceptor : Interceptor {
         private readonly ILogger<RestSharpBodyDumperInterceptor> _logger;
+
+        public CookieContainer? Cookies { get; set; }
 
         public RestSharpBodyDumperInterceptor(ILogger<RestSharpBodyDumperInterceptor> logger) {
             _logger = logger;
@@ -25,8 +28,10 @@ namespace IlPostPodcastProxy {
                 return ValueTask.CompletedTask;
             }
 
-            _logger.LogDebug("Response {StatusDescription} {StatusCode}, {ContentLength} bytes of type {ContentType}",
-                response.StatusDescription, (int)response.StatusCode, response.ContentLength ?? 0, response.ContentType);
+            var effectiveContentLength = response.RawBytes?.Length ?? (response.Content is { } content ? System.Text.Encoding.UTF8.GetByteCount(content) : 0);
+            _logger.LogDebug("Response {StatusCode} {StatusDescription}, {ContentLength} bytes of type {ContentType}{CookieInfo}",
+                (int)response.StatusCode, response.StatusDescription, effectiveContentLength, response.ContentType,
+                Cookies != null ? $" with {Cookies.Count} cookies" : string.Empty);
 
             return ValueTask.CompletedTask;
         }

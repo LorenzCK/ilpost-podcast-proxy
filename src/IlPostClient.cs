@@ -7,7 +7,7 @@ using RestSharp;
 
 namespace IlPostPodcastProxy {
     internal class IlPostClient {
-        private static readonly Uri LoginUrl = new("https://abbonati.ilpost.it/mio-account/?forcelogin=true");
+        private static readonly Uri LoginUrl = new("https://www.ilpost.it/wp-login.php");
         private static readonly Uri SiteUrl = new("https://www.ilpost.it/");
         private static readonly XNamespace Itunes = "http://www.itunes.com/dtds/podcast-1.0.dtd";
         private readonly IConfiguration _configuration;
@@ -17,10 +17,15 @@ namespace IlPostPodcastProxy {
 
         public IlPostClient(IConfiguration configuration, RestSharpBodyDumperInterceptor interceptor) {
             _configuration = configuration;
+
             _restClient = new RestClient(new RestClientOptions {
                 CookieContainer = _cookies,
-                Interceptors = [interceptor],
+                Interceptors = { interceptor },
+                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
             });
+            interceptor.Cookies = _cookies;
+            _restClient.AddDefaultHeader("Accept-Language", "it;q=0.9,en-US,en;q=0.9");
+            _restClient.AddDefaultHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         }
 
         public async Task LoginAsync(CancellationToken cancellationToken = default) {
@@ -32,11 +37,19 @@ namespace IlPostPodcastProxy {
             }
 
             _loggedIn = false;
+
+            // WordPress sets wordpress_test_cookie when the login form is loaded. It must be
+            // sent back with the POST, so prime the shared CookieContainer first.
+            var loginPage = await _restClient.ExecuteAsync(new RestRequest(LoginUrl), cancellationToken);
+            RequireContent(loginPage, "login page");
+
             var request = new RestRequest(LoginUrl, Method.Post);
+            request.AddHeader("Referer", "https://www.ilpost.it/wp-login.php");
             request.AddParameter("log", username);
             request.AddParameter("pwd", password);
+            request.AddParameter("rememberme", "forever");
             request.AddParameter("wp-submit", "Login");
-            request.AddParameter("redirect_to", "https://www.ilpost.it/wp-admin/");
+            request.AddParameter("redirect_to", "https://www.ilpost.it/wp-admin/profile.php");
             request.AddParameter("testcookie", "1");
 
             var response = await _restClient.ExecuteAsync(request, cancellationToken);
@@ -45,6 +58,7 @@ namespace IlPostPodcastProxy {
             if (!_cookies.GetCookies(SiteUrl).Cast<Cookie>().Any(cookie => cookie.Name.StartsWith("wordpress_logged_in_", StringComparison.Ordinal))) {
                 throw new InvalidOperationException("Il Post login did not establish an authenticated session.");
             }
+
             _loggedIn = true;
         }
 
